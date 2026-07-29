@@ -1,5 +1,8 @@
 import {
+  chatCompletionsEndpoint,
+  extractChatCompletionText,
   extractOutputText,
+  isMoonshotBaseUrl,
   responsesEndpoint,
   sameOriginOrNoOrigin,
   validateExternalBaseUrl,
@@ -85,45 +88,95 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
+    const isMoonshot = isMoonshotBaseUrl(baseUrl);
+    if (isMoonshot && !/^(kimi-|moonshot-)/i.test(model)) {
+      return Response.json(
+        { error: "Moonshot 截图识别请使用 kimi-k2.6" },
+        { status: 400 },
+      );
+    }
     const bytes = new Uint8Array(await file.arrayBuffer());
     let binary = "";
     for (let offset = 0; offset < bytes.length; offset += 0x8000) {
       binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
     }
     const imageUrl = `data:${file.type};base64,${btoa(binary)}`;
-    const upstream = await fetch(responsesEndpoint(baseUrl), {
+    const upstream = await fetch(
+      isMoonshot
+        ? chatCompletionsEndpoint(baseUrl)
+        : responsesEndpoint(baseUrl),
+      {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model,
-        store: false,
-        max_output_tokens: 1200,
-        instructions:
-          "你是证券账户截图识别器。只提取截图明确显示的数据，不猜测被遮挡字段；金额不要带千分位符号。返回符合JSON Schema的结果。",
-        input: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text: "识别可用资金、总资产和全部持仓。识别不确定的字段填0并写入warnings。",
+      body: JSON.stringify(
+        isMoonshot
+          ? {
+              model,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "你是证券账户截图识别器。只提取截图明确显示的数据，不猜测被遮挡字段；金额不要带千分位符号。严格按JSON Schema返回。",
+                },
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: "识别可用资金、总资产和全部持仓。识别不确定的字段填0并写入warnings。",
+                    },
+                    {
+                      type: "image_url",
+                      image_url: { url: imageUrl },
+                    },
+                  ],
+                },
+              ],
+              response_format: {
+                type: "json_schema",
+                json_schema: {
+                  name: "portfolio_snapshot",
+                  strict: true,
+                  schema: portfolioSchema,
+                },
               },
-              { type: "input_image", image_url: imageUrl, detail: "high" },
-            ],
-          },
-        ],
-        text: {
-          format: {
-            type: "json_schema",
-            name: "portfolio_snapshot",
-            strict: true,
-            schema: portfolioSchema,
-          },
-        },
-      }),
+              max_completion_tokens: 1200,
+            }
+          : {
+              model,
+              store: false,
+              max_output_tokens: 1200,
+              instructions:
+                "你是证券账户截图识别器。只提取截图明确显示的数据，不猜测被遮挡字段；金额不要带千分位符号。返回符合JSON Schema的结果。",
+              input: [
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: "识别可用资金、总资产和全部持仓。识别不确定的字段填0并写入warnings。",
+                    },
+                    {
+                      type: "input_image",
+                      image_url: imageUrl,
+                      detail: "high",
+                    },
+                  ],
+                },
+              ],
+              text: {
+                format: {
+                  type: "json_schema",
+                  name: "portfolio_snapshot",
+                  strict: true,
+                  schema: portfolioSchema,
+                },
+              },
+            },
+      ),
       signal: AbortSignal.timeout(45_000),
     });
     const payload = (await upstream.json()) as unknown;
@@ -133,7 +186,9 @@ export async function POST(request: Request) {
         { status: 502 },
       );
     }
-    const output = extractOutputText(payload);
+    const output = isMoonshot
+      ? extractChatCompletionText(payload)
+      : extractOutputText(payload);
     const portfolio = JSON.parse(output);
     return Response.json({ portfolio });
   } catch (error) {
