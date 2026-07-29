@@ -2,11 +2,13 @@ import {
   chatCompletionsEndpoint,
   extractChatCompletionText,
   extractOutputText,
+  fetchModelWithRetry,
   isMoonshotBaseUrl,
   responsesEndpoint,
   sameOriginOrNoOrigin,
   validateExternalBaseUrl,
 } from "../../security";
+import { resolveLlmConfig } from "../../server-llm";
 
 export async function POST(request: Request) {
   if (!sameOriginOrNoOrigin(request)) {
@@ -18,11 +20,12 @@ export async function POST(request: Request) {
       apiKey?: string;
       model?: string;
     };
-    const baseUrl = validateExternalBaseUrl(body.baseUrl?.trim() ?? "");
-    const apiKey = body.apiKey?.trim() ?? "";
-    const model = body.model?.trim() ?? "";
-    if (!apiKey || apiKey.length > 512) {
-      return Response.json({ error: "请填写有效的API Key" }, { status: 400 });
+    const resolved = resolveLlmConfig(body);
+    const baseUrl = validateExternalBaseUrl(resolved.config.baseUrl);
+    const apiKey = resolved.config.apiKey;
+    const model = resolved.config.model;
+    if (apiKey.length > 512) {
+      return Response.json({ error: "API Key格式不正确" }, { status: 400 });
     }
     if (!model || model.length > 100) {
       return Response.json({ error: "请填写有效的模型名称" }, { status: 400 });
@@ -38,34 +41,38 @@ export async function POST(request: Request) {
       );
     }
     const started = Date.now();
-    const upstream = await fetch(
-      isMoonshot
-        ? chatCompletionsEndpoint(baseUrl)
-        : responsesEndpoint(baseUrl),
-      {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(
+    const upstream = await fetchModelWithRetry(() =>
+      fetch(
         isMoonshot
-          ? {
-              model,
-              messages: [
-                { role: "user", content: "只回复四个字：连接成功" },
-              ],
-              max_completion_tokens: 24,
-            }
-          : {
-              model,
-              input: "只回复四个字：连接成功",
-              max_output_tokens: 24,
-              store: false,
-            },
+          ? chatCompletionsEndpoint(baseUrl)
+          : responsesEndpoint(baseUrl),
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(
+            isMoonshot
+              ? {
+                  model,
+                  thinking: { type: "disabled" },
+                  messages: [
+                    { role: "user", content: "只回复四个字：连接成功" },
+                  ],
+                  max_completion_tokens: 24,
+                }
+              : {
+                  model,
+                  input: "只回复四个字：连接成功",
+                  max_output_tokens: 24,
+                  store: false,
+                },
+          ),
+          signal: AbortSignal.timeout(30_000),
+        },
       ),
-      signal: AbortSignal.timeout(20_000),
-    });
+    );
     const payload = (await upstream.json()) as unknown;
     if (!upstream.ok) {
       const message =
@@ -83,6 +90,7 @@ export async function POST(request: Request) {
       ok: true,
       model,
       provider: isMoonshot ? "Moonshot" : "OpenAI Responses",
+      managed: resolved.managed,
       latencyMs: Date.now() - started,
       message:
         (isMoonshot
