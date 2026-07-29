@@ -1,6 +1,7 @@
 {
   "buildCommand": "npm run build",
   "installCommand": "npm ci",
+  "outputDirectory": ".next",
   "nodeVersion": "22.17.1",
   "cloudFunctions": {
     "mainlandRegions": ["ap-guangzhou"],
