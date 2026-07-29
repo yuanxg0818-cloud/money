@@ -30,6 +30,8 @@ test("contains the finished Chinese investment app and security policy", async (
     edgeone,
     llmSecurity,
     llmTest,
+    llmStatus,
+    serverLlm,
     modelAnalysis,
     reportRoute,
     portfolioParse,
@@ -41,6 +43,8 @@ test("contains the finished Chinese investment app and security policy", async (
     source("../edgeone.json"),
     source("../app/api/security.ts"),
     source("../app/api/llm/test/route.ts"),
+    source("../app/api/llm/status/route.ts"),
+    source("../app/api/server-llm.ts"),
     source("../app/api/model-analysis.ts"),
     source("../app/api/report/route.ts"),
     source("../app/api/portfolio/parse/route.ts"),
@@ -52,11 +56,16 @@ test("contains the finished Chinese investment app and security policy", async (
   assert.match(app, /未调用模型不会生成买卖建议/);
   assert.match(app, /请求模型综合研判/);
   assert.match(app, /AI综合/);
+  assert.match(app, /https:\/\/api\.moonshot\.cn\/v1/);
+  assert.match(app, /kimi-k2\.6/);
+  assert.match(app, /服务端 Kimi/);
   assert.match(app, /当前上涨潜力排序/);
   assert.match(app, /按最新市场诊断持仓/);
   assert.match(app, /持仓证券代码临时发送给东方财富公开行情接口/);
   assert.match(liveMarket, /profile\.quoteLookupConsent !== true/);
   assert.match(liveMarket, /cache: "no-store"/);
+  assert.match(liveMarket, /push2delay\.eastmoney\.com/);
+  assert.doesNotMatch(liveMarket, /https:\/\/(?:82|88)\.push2\.eastmoney\.com/);
   assert.match(app, /premarket_profile_v1/);
   assert.match(app, /持仓仅保存在当前浏览器/);
   assert.match(nextConfig, /X-Frame-Options/);
@@ -71,6 +80,11 @@ test("contains the finished Chinese investment app and security policy", async (
   assert.match(llmSecurity, /api\.moonshot\.cn/);
   assert.match(llmSecurity, /chat\/completions/);
   assert.match(llmTest, /Moonshot API 不能使用 GPT 模型/);
+  assert.match(llmTest, /resolveLlmConfig/);
+  assert.match(llmStatus, /serverModelStatus/);
+  assert.match(serverLlm, /MOONSHOT_API_KEY/);
+  assert.match(serverLlm, /DEFAULT_MOONSHOT_MODEL = "kimi-k2\.6"/);
+  assert.doesNotMatch(serverLlm, /\bsk-[a-zA-Z0-9_-]{12,}/);
   assert.match(modelAnalysis, /strictTemporalRule/);
   assert.match(modelAnalysis, /只能使用cutoff时刻及之前的数据/);
   assert.match(modelAnalysis, /rankedCandidates只能使用candidates中的code/);
