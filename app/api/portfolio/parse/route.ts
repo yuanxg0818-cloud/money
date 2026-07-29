@@ -2,11 +2,13 @@ import {
   chatCompletionsEndpoint,
   extractChatCompletionText,
   extractOutputText,
+  fetchModelWithRetry,
   isMoonshotBaseUrl,
   responsesEndpoint,
   sameOriginOrNoOrigin,
   validateExternalBaseUrl,
 } from "../../security";
+import { resolveLlmConfig } from "../../server-llm";
 
 // EdgeOne Cloud Functions accepts request bodies up to 6 MB. Keep multipart
 // overhead below that ceiling before forwarding a base64 copy upstream.
@@ -79,15 +81,14 @@ export async function POST(request: Request) {
         { status: 413 },
       );
     }
-    const baseUrl = validateExternalBaseUrl(String(form.get("baseUrl") ?? ""));
-    const apiKey = String(form.get("apiKey") ?? "").trim();
-    const model = String(form.get("model") ?? "").trim();
-    if (!apiKey || !model) {
-      return Response.json(
-        { error: "请先配置并测试模型API" },
-        { status: 400 },
-      );
-    }
+    const resolved = resolveLlmConfig({
+      baseUrl: String(form.get("baseUrl") ?? ""),
+      apiKey: String(form.get("apiKey") ?? ""),
+      model: String(form.get("model") ?? ""),
+    });
+    const baseUrl = validateExternalBaseUrl(resolved.config.baseUrl);
+    const apiKey = resolved.config.apiKey;
+    const model = resolved.config.model;
     const isMoonshot = isMoonshotBaseUrl(baseUrl);
     if (isMoonshot && !/^(kimi-|moonshot-)/i.test(model)) {
       return Response.json(
@@ -101,11 +102,12 @@ export async function POST(request: Request) {
       binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
     }
     const imageUrl = `data:${file.type};base64,${btoa(binary)}`;
-    const upstream = await fetch(
-      isMoonshot
-        ? chatCompletionsEndpoint(baseUrl)
-        : responsesEndpoint(baseUrl),
-      {
+    const upstream = await fetchModelWithRetry(() =>
+      fetch(
+        isMoonshot
+          ? chatCompletionsEndpoint(baseUrl)
+          : responsesEndpoint(baseUrl),
+        {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -115,6 +117,7 @@ export async function POST(request: Request) {
         isMoonshot
           ? {
               model,
+              thinking: { type: "disabled" },
               messages: [
                 {
                   role: "system",
@@ -178,7 +181,9 @@ export async function POST(request: Request) {
             },
       ),
       signal: AbortSignal.timeout(45_000),
-    });
+        },
+      ),
+    );
     const payload = (await upstream.json()) as unknown;
     if (!upstream.ok) {
       return Response.json(
