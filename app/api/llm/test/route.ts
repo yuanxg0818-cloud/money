@@ -1,5 +1,8 @@
 import {
+  chatCompletionsEndpoint,
+  extractChatCompletionText,
   extractOutputText,
+  isMoonshotBaseUrl,
   responsesEndpoint,
   sameOriginOrNoOrigin,
   validateExternalBaseUrl,
@@ -24,19 +27,43 @@ export async function POST(request: Request) {
     if (!model || model.length > 100) {
       return Response.json({ error: "请填写有效的模型名称" }, { status: 400 });
     }
+    const isMoonshot = isMoonshotBaseUrl(baseUrl);
+    if (isMoonshot && !/^(kimi-|moonshot-)/i.test(model)) {
+      return Response.json(
+        {
+          error: "Moonshot API 不能使用 GPT 模型，请改为 kimi-k2.6",
+          suggestedModel: "kimi-k2.6",
+        },
+        { status: 400 },
+      );
+    }
     const started = Date.now();
-    const upstream = await fetch(responsesEndpoint(baseUrl), {
+    const upstream = await fetch(
+      isMoonshot
+        ? chatCompletionsEndpoint(baseUrl)
+        : responsesEndpoint(baseUrl),
+      {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model,
-        input: "只回复四个字：连接成功",
-        max_output_tokens: 24,
-        store: false,
-      }),
+      body: JSON.stringify(
+        isMoonshot
+          ? {
+              model,
+              messages: [
+                { role: "user", content: "只回复四个字：连接成功" },
+              ],
+              max_completion_tokens: 24,
+            }
+          : {
+              model,
+              input: "只回复四个字：连接成功",
+              max_output_tokens: 24,
+              store: false,
+            },
+      ),
       signal: AbortSignal.timeout(20_000),
     });
     const payload = (await upstream.json()) as unknown;
@@ -55,8 +82,12 @@ export async function POST(request: Request) {
     return Response.json({
       ok: true,
       model,
+      provider: isMoonshot ? "Moonshot" : "OpenAI Responses",
       latencyMs: Date.now() - started,
-      message: extractOutputText(payload) || "连接成功",
+      message:
+        (isMoonshot
+          ? extractChatCompletionText(payload)
+          : extractOutputText(payload)) || "连接成功",
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "连接失败";
