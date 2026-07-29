@@ -24,7 +24,8 @@ function isPrivateIpv4(hostname: string) {
 
 export function validateExternalBaseUrl(
   raw: string,
-  allowlistEnv = process.env.LLM_ALLOWED_HOSTS ?? "api.openai.com",
+  allowlistEnv = process.env.LLM_ALLOWED_HOSTS ??
+    "api.openai.com,api.moonshot.cn",
 ) {
   let url: URL;
   try {
@@ -55,6 +56,10 @@ export function validateExternalBaseUrl(
   return url;
 }
 
+export function isMoonshotBaseUrl(base: URL) {
+  return base.hostname.toLowerCase() === "api.moonshot.cn";
+}
+
 export function responsesEndpoint(base: URL) {
   const normalized = new URL(base.toString());
   const path = normalized.pathname.replace(/\/+$/, "");
@@ -63,6 +68,19 @@ export function responsesEndpoint(base: URL) {
     : path.endsWith("/v1")
       ? `${path}/responses`
       : `${path}/v1/responses`;
+  normalized.search = "";
+  normalized.hash = "";
+  return normalized;
+}
+
+export function chatCompletionsEndpoint(base: URL) {
+  const normalized = new URL(base.toString());
+  const path = normalized.pathname.replace(/\/+$/, "");
+  normalized.pathname = path.endsWith("/chat/completions")
+    ? path
+    : path.endsWith("/v1")
+      ? `${path}/chat/completions`
+      : `${path}/v1/chat/completions`;
   normalized.search = "";
   normalized.hash = "";
   return normalized;
@@ -84,6 +102,15 @@ export function extractOutputText(payload: unknown) {
     .map((item) => (typeof item.text === "string" ? item.text : ""))
     .join("\n")
     .trim();
+}
+
+export function extractChatCompletionText(payload: unknown) {
+  if (!payload || typeof payload !== "object") return "";
+  const response = payload as {
+    choices?: Array<{ message?: { content?: unknown } }>;
+  };
+  const content = response.choices?.[0]?.message?.content;
+  return typeof content === "string" ? content.trim() : "";
 }
 
 export function sameOriginOrNoOrigin(request: Request) {
