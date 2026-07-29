@@ -133,6 +133,10 @@ export type ReportAction = {
 
 export type MarketReport = {
   source: "demo" | "live" | "live-lite";
+  analysisMode?: "rules" | "model";
+  modelProvider?: string;
+  modelName?: string;
+  analysisDurationMs?: number;
   generatedAt: string;
   marketStatus: string;
   freshnessText: string;
