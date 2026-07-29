@@ -63,7 +63,7 @@ npm test
 
 1. 将本分支推送到 EdgeOne 可访问的 GitHub、GitLab 或 Gitee 仓库。
 2. 在 Makers 创建 Next.js 项目，生产分支选择 `main`。
-3. `edgeone.json` 已固定 Node.js 22.17.1、广州 Cloud Functions 与 120 秒超时。
+3. `edgeone.json` 已固定 `.next` 全栈输出目录、Node.js 22.17.1、广州 Cloud Functions 与 120 秒超时，避免项目被误判为纯静态站点。
 4. 在生产环境配置 `LLM_ALLOWED_HOSTS`，按需配置高级分析引擎的三个环境变量。
 5. 部署完成后绑定已备案的自定义域名。
 
