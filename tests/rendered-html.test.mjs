@@ -59,12 +59,16 @@ test("contains the finished Chinese investment app and security policy", async (
   assert.match(app, /https:\/\/api\.moonshot\.cn\/v1/);
   assert.match(app, /kimi-k2\.6/);
   assert.match(app, /服务端 Kimi/);
+  assert.match(app, /规则池.*Kimi精选/);
+  assert.match(app, /规则#.*模型#/);
   assert.match(app, /当前上涨潜力排序/);
   assert.match(app, /按最新市场诊断持仓/);
   assert.match(app, /持仓证券代码临时发送给东方财富公开行情接口/);
   assert.match(liveMarket, /profile\.quoteLookupConsent !== true/);
   assert.match(liveMarket, /cache: "no-store"/);
   assert.match(liveMarket, /push2delay\.eastmoney\.com/);
+  assert.match(liveMarket, /MODEL_CANDIDATE_POOL_SIZE = 40/);
+  assert.match(liveMarket, /\.slice\(0, MODEL_CANDIDATE_POOL_SIZE\)/);
   assert.doesNotMatch(liveMarket, /https:\/\/(?:82|88)\.push2\.eastmoney\.com/);
   assert.match(app, /premarket_profile_v1/);
   assert.match(app, /持仓仅保存在当前浏览器/);
@@ -88,6 +92,14 @@ test("contains the finished Chinese investment app and security policy", async (
   assert.match(modelAnalysis, /strictTemporalRule/);
   assert.match(modelAnalysis, /只能使用cutoff时刻及之前的数据/);
   assert.match(modelAnalysis, /rankedCandidates只能使用candidates中的code/);
+  assert.match(modelAnalysis, /minItems: 10/);
+  assert.match(modelAnalysis, /必须给出10个互不重复的code/);
+  assert.match(modelAnalysis, /changedFromRuleTop10/);
+  assert.match(modelAnalysis, /模型只完成了.*未达到10只/);
+  assert.doesNotMatch(
+    modelAnalysis,
+    /for \(const original of report\.candidates\) \{\s*if \(!seen\.has\(original\.code\)\) ranked\.push\(original\)/,
+  );
   assert.match(modelAnalysis, /maxBuyQuantity/);
   assert.match(modelAnalysis, /analysisMode: "model"/);
   assert.match(reportRoute, /MODEL_REQUIRED/);
