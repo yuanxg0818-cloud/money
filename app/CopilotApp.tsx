@@ -233,6 +233,19 @@ export function CopilotApp() {
     target: "market" | "portfolio",
     nextProfile = profile,
   ) {
+    if (
+      connection !== "connected" ||
+      !llm.baseUrl.trim() ||
+      !llm.apiKey.trim() ||
+      !llm.model.trim()
+    ) {
+      setSettingsOpen(true);
+      setToast({
+        tone: "warn",
+        text: "请先测试并连接模型；未调用模型不会生成买卖建议",
+      });
+      return;
+    }
     if (target === "market") {
       setRunning(true);
     } else {
@@ -246,7 +259,10 @@ export function CopilotApp() {
           "Content-Type": "application/json",
           "Cache-Control": "no-cache",
         },
-        body: JSON.stringify(nextProfile),
+        body: JSON.stringify({
+          profile: nextProfile,
+          llm,
+        }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "分析失败");
@@ -407,14 +423,18 @@ export function CopilotApp() {
           <div className="decision-meta">
             <span className={`live-chip ${report.source}`}>
               <i />
-              {report.source === "live"
-                ? "高级实时"
-                : report.source === "live-lite"
-                  ? "实时"
-                  : "安全演示"}
+              {report.analysisMode === "model"
+                ? `AI综合 · ${report.modelProvider ?? "模型"}`
+                : report.source === "demo"
+                  ? "未生成建议"
+                  : "仅数据层"}
             </span>
             <span>{report.marketStatus}</span>
             <span>更新于 {freshness(report.generatedAt)}</span>
+            {report.analysisMode === "model" &&
+              report.analysisDurationMs != null && (
+                <span>模型耗时 {(report.analysisDurationMs / 1000).toFixed(1)}秒</span>
+              )}
           </div>
           <div className="decision-layout">
             <div className="decision-copy">
@@ -427,7 +447,9 @@ export function CopilotApp() {
                 disabled={running}
               >
                 <span className={running ? "spinning" : ""}>↻</span>
-                {running ? "正在拉取最新行情与消息…" : "按当前时刻重新生成"}
+                {running
+                  ? "正在拉取数据并请求模型综合研判…"
+                  : "按当前时刻重新生成"}
               </button>
             </div>
             <div
@@ -1324,6 +1346,7 @@ export function CopilotApp() {
               value={llm.baseUrl}
               onChange={(event) => {
                 const baseUrl = event.target.value;
+                setConnection("idle");
                 setLlm((current) => ({
                   ...current,
                   baseUrl,
@@ -1345,12 +1368,13 @@ export function CopilotApp() {
             <span>模型名称</span>
             <input
               value={llm.model}
-              onChange={(event) =>
+              onChange={(event) => {
+                setConnection("idle");
                 setLlm((current) => ({
                   ...current,
                   model: event.target.value,
-                }))
-              }
+                }));
+              }}
               placeholder="gpt-5.6"
               required
             />
@@ -1366,12 +1390,13 @@ export function CopilotApp() {
               <input
                 type={keyVisible ? "text" : "password"}
                 value={llm.apiKey}
-                onChange={(event) =>
+                onChange={(event) => {
+                  setConnection("idle");
                   setLlm((current) => ({
                     ...current,
                     apiKey: event.target.value,
-                  }))
-                }
+                  }));
+                }}
                 placeholder="仅用于本次连接"
                 autoComplete="off"
                 required
@@ -1407,7 +1432,7 @@ export function CopilotApp() {
           </button>
         </form>
         <div className="drawer-disclaimer">
-          持仓截图会发送给你选择的模型服务商。请勿上传交易密码、短信验证码、身份证或银行卡信息。
+          生成建议时，最新行情摘要、技术与风险因子、财经快讯和你录入的持仓会发送给所选模型服务商。持仓截图仅在识别时发送。请勿上传交易密码、短信验证码、身份证或银行卡信息。
         </div>
       </aside>
 
