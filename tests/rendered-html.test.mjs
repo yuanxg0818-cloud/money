@@ -63,6 +63,11 @@ test("contains the finished Chinese investment app and security policy", async (
   assert.match(nextConfig, /Content-Security-Policy/);
   assert.match(edgeone, /ap-guangzhou/);
   assert.match(edgeone, /22\.17\.1/);
+  assert.match(
+    edgeone,
+    /"outputDirectory"\s*:\s*"\.next"/,
+    "EdgeOne must deploy the Next.js full-stack output instead of treating the repository root as a static project",
+  );
   assert.match(llmSecurity, /api\.moonshot\.cn/);
   assert.match(llmSecurity, /chat\/completions/);
   assert.match(llmTest, /Moonshot API 不能使用 GPT 模型/);
