@@ -711,6 +711,7 @@ export async function buildLiveMarketReport(
         ];
   return {
     source: "live-lite",
+    analysisMode: "rules",
     generatedAt: now.toISOString(),
     marketStatus,
     freshnessText: `点击时刷新 · ${Math.max(1, Date.now() - started)}ms`,
