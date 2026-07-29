@@ -46,6 +46,8 @@ export type ScoreFactors = {
 
 export type Candidate = {
   rank: number;
+  ruleRank?: number;
+  modelRankChange?: number;
   code: string;
   name: string;
   kind: "主板" | "ETF";
@@ -137,6 +139,13 @@ export type MarketReport = {
   modelProvider?: string;
   modelName?: string;
   analysisDurationMs?: number;
+  selectionAudit?: {
+    candidatePoolSize: number;
+    selectedCount: number;
+    changedFromRuleTop10: number;
+    ruleTop10Codes: string[];
+    modelTop10Codes: string[];
+  };
   generatedAt: string;
   marketStatus: string;
   freshnessText: string;
