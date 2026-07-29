@@ -7,6 +7,7 @@ import type {
 import { buildLiveMarketReport } from "../live-market";
 import { synthesizeMarketReport } from "../model-analysis";
 import { sameOriginOrNoOrigin, validateExternalBaseUrl } from "../security";
+import { resolveLlmConfig } from "../server-llm";
 
 type UpstreamReport = {
   generated_at?: string;
@@ -401,11 +402,16 @@ export async function POST(request: Request) {
   } catch {
     return noStore({ error: "账户数据格式不正确" }, { status: 400 });
   }
-  if (!llm?.baseUrl || !llm.apiKey || !llm.model) {
+  let resolvedLlm;
+  try {
+    resolvedLlm = resolveLlmConfig(llm);
+  } catch (error) {
     return noStore(
       {
         error:
-          "请先在模型 API 设置中测试并连接模型；未调用模型不会生成买卖建议",
+          error instanceof Error
+            ? error.message
+            : "请先配置并连接模型；未调用模型不会生成买卖建议",
         code: "MODEL_REQUIRED",
       },
       { status: 428 },
@@ -455,11 +461,7 @@ export async function POST(request: Request) {
     const report = await synthesizeMarketReport(
       baseReport,
       profile,
-      {
-        baseUrl: llm.baseUrl,
-        apiKey: llm.apiKey,
-        model: llm.model,
-      },
+      resolvedLlm.config,
     );
     return noStore({
       report,
