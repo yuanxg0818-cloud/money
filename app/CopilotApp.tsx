@@ -472,6 +472,13 @@ export function CopilotApp() {
               report.analysisDurationMs != null && (
                 <span>模型耗时 {(report.analysisDurationMs / 1000).toFixed(1)}秒</span>
               )}
+            {report.analysisMode === "model" && report.selectionAudit && (
+              <span>
+                规则池 {report.selectionAudit.candidatePoolSize} → Kimi精选{" "}
+                {report.selectionAudit.selectedCount} · 替换规则Top10中的{" "}
+                {report.selectionAudit.changedFromRuleTop10}只
+              </span>
+            )}
           </div>
           <div className="decision-layout">
             <div className="decision-copy">
@@ -631,6 +638,9 @@ export function CopilotApp() {
                     <strong>{candidate.name}</strong>
                     <span>
                       {candidate.code} · {candidate.kind}
+                      {candidate.ruleRank
+                        ? ` · 规则#${candidate.ruleRank}→模型#${candidate.rank}`
+                        : ""}
                     </span>
                   </div>
                   <div className="preview-price">
@@ -687,6 +697,9 @@ export function CopilotApp() {
               <h3>{candidate.name}</h3>
               <span>
                 {candidate.code} · {candidate.kind}
+                {candidate.ruleRank
+                  ? ` · 规则#${candidate.ruleRank}→模型#${candidate.rank}`
+                  : ""}
               </span>
             </div>
             <span className="candidate-tag">{candidate.tag}</span>
@@ -784,7 +797,7 @@ export function CopilotApp() {
             <p className="eyebrow">UPSIDE POTENTIAL</p>
             <h1>当前上涨潜力排序</h1>
             <p>
-              综合当日动量、中期趋势、流动性、估值、快讯与波动风险；仅在主板股票和ETF中比较。
+              规则层先在主板股票和ETF中建立宽候选池，再由Kimi结合行情、快讯、风险与市场环境独立选出最终10只。
             </p>
           </div>
           <button
@@ -798,9 +811,15 @@ export function CopilotApp() {
         </section>
         <section className="method-card">
           <div>
-            <strong>评分 ≠ 上涨概率</strong>
+            <strong>
+              {report.selectionAudit
+                ? `Kimi从${report.selectionAudit.candidatePoolSize}只中精选${report.selectionAudit.selectedCount}只`
+                : "评分 ≠ 上涨概率"}
+            </strong>
             <span>
-              它回答“当前谁更值得优先研究”，不回答“谁一定会涨”。
+              {report.selectionAudit
+                ? `与规则Top10相比替换${report.selectionAudit.changedFromRuleTop10}只；模型排名仍不代表上涨概率。`
+                : "它回答“当前谁更值得优先研究”，不回答“谁一定会涨”。"}
             </span>
           </div>
           <div className="method-weights">
