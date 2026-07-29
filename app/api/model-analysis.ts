@@ -10,6 +10,7 @@ import {
   chatCompletionsEndpoint,
   extractChatCompletionText,
   extractOutputText,
+  fetchModelWithRetry,
   isMoonshotBaseUrl,
   responsesEndpoint,
   validateExternalBaseUrl,
@@ -194,6 +195,21 @@ function texts(value: unknown, fallback: string[]) {
   return values.length > 0 ? values : fallback;
 }
 
+function confidenceScore(value: unknown, fallback = 0) {
+  const score = clamp(value ?? fallback);
+  return Math.round(score > 0 && score <= 1 ? score * 100 : score);
+}
+
+function withoutPriceClaims(value: unknown, fallback: string[]) {
+  const filtered = texts(value, []).filter(
+    (item) =>
+      !/买入区间|价格条件|当前价|当前价格|事实价格|失效价|止损价/.test(
+        item,
+      ),
+  );
+  return filtered.length > 0 ? filtered : fallback;
+}
+
 function potentialLabel(score: number) {
   return score >= 78
     ? "高潜力"
@@ -205,6 +221,41 @@ function potentialLabel(score: number) {
 }
 
 function modelSnapshot(report: MarketReport, profile: ProfilePayload) {
+  const eligibleCodes: string[] = [];
+  const candidates = report.candidates.map((candidate) => {
+    const priceConditionStatus =
+      candidate.price < candidate.buyLow
+        ? "below"
+        : candidate.price > candidate.buyHigh
+          ? "above"
+          : "inside";
+    const serverMaxBuyQuantity = maxBuyQuantity(candidate, profile, 0);
+    if (priceConditionStatus === "inside" && serverMaxBuyQuantity >= 100) {
+      eligibleCodes.push(candidate.code);
+    }
+    return {
+      code: candidate.code,
+      name: candidate.name,
+      kind: candidate.kind,
+      price: candidate.price,
+      changePct: candidate.change,
+      open: candidate.open,
+      high: candidate.high,
+      low: candidate.low,
+      amount: candidate.amount,
+      turnoverPct: candidate.turnover,
+      peTtm: candidate.pe,
+      marketCap: candidate.marketCap,
+      deterministicScore: candidate.score,
+      buyRange: [candidate.buyLow, candidate.buyHigh],
+      priceConditionStatus,
+      serverMaxBuyQuantity,
+      invalidationPrice: candidate.stopPrice,
+      factors: candidate.factors,
+      thesis: candidate.thesis,
+      risks: candidate.risks,
+    };
+  });
   return {
     cutoff: report.generatedAt,
     strictTemporalRule:
@@ -221,26 +272,7 @@ function modelSnapshot(report: MarketReport, profile: ProfilePayload) {
       indices: report.indices,
       breadth: report.breadth,
     },
-    candidates: report.candidates.map((candidate) => ({
-      code: candidate.code,
-      name: candidate.name,
-      kind: candidate.kind,
-      price: candidate.price,
-      changePct: candidate.change,
-      open: candidate.open,
-      high: candidate.high,
-      low: candidate.low,
-      amount: candidate.amount,
-      turnoverPct: candidate.turnover,
-      peTtm: candidate.pe,
-      marketCap: candidate.marketCap,
-      deterministicScore: candidate.score,
-      buyRange: [candidate.buyLow, candidate.buyHigh],
-      invalidationPrice: candidate.stopPrice,
-      factors: candidate.factors,
-      thesis: candidate.thesis,
-      risks: candidate.risks,
-    })),
+    candidates,
     latestNews: report.news.slice(0, 24).map((item) => ({
       publishedAt: item.publishedAt,
       tag: item.tag,
@@ -263,6 +295,12 @@ function modelSnapshot(report: MarketReport, profile: ProfilePayload) {
         pnlPct: holding.pnl_pct,
       })),
       riskLimits: profile.risk,
+      serverExecutionFacts: {
+        eligibleCodes,
+        eligibleCount: eligibleCodes.length,
+        note:
+          "priceConditionStatus与serverMaxBuyQuantity由服务端计算，是唯一可用于订单判断的权威结果。",
+      },
     },
     dataSources: report.sources,
     knownLimitations: report.warnings,
@@ -277,12 +315,14 @@ const systemInstruction = `你是A股主板与ETF的组合研究模型。输入�
 1. 只使用输入数据，不得引入cutoff之后的信息，不得声称知道未来走势。
 2. 不得创造候选证券、行情价格、财务数据或新闻；rankedCandidates只能使用candidates中的code。
 3. tradePlan买入只能用候选code；卖出和holdingActions只能用portfolio.holdings中的code。
-4. 价格条件引用输入中的buyRange、invalidationPrice或当前价，不得编造精确价位。
+4. priceConditionStatus与serverMaxBuyQuantity是服务端权威计算，不得自行重新比较价格或重新计算数量；只有status=inside且serverMaxBuyQuantity>=100才可买。
 5. 市场信号矛盾、数据不足、价格已超买入区间或风险预算不足时选择wait。
 6. 数量按A股/ETF的100股（份）整数手给出。卖出不得超过availableQuantity；买入不得突破现金储备、单票仓位和新增敞口上限。
 7. 同一时点最多给一笔核心动作；没有高质量动作时tradePlan返回空数组。
 8. rankedCandidates评分是相对优先级，不是上涨概率。理由必须明确区分事实、推断与风险。
-9. 输出必须严格符合JSON Schema，使用简体中文。`;
+9. 输出必须严格符合JSON Schema，使用简体中文。
+10. score和confidence均使用0-100分制；1代表1分而不是100分。8%的单票上限是正常风控预算，不得仅因仓位上限较小就断言操作无效。
+11. 不得声称“全部候选都不满足价格条件”，除非serverExecutionFacts.eligibleCount确实为0。`;
 
 function parseJudgement(raw: string): ModelJudgement {
   const cleaned = raw
@@ -341,14 +381,23 @@ function mergeCandidates(
     if (!original || seen.has(original.code)) continue;
     seen.add(original.code);
     const score = Math.round(clamp(item.score));
+    const priceFact =
+      original.price < original.buyLow
+        ? `服务端复核：当前价低于买入区间${original.buyLow}–${original.buyHigh}`
+        : original.price > original.buyHigh
+          ? `服务端复核：当前价高于买入区间${original.buyLow}–${original.buyHigh}`
+          : `服务端复核：当前价处于买入区间${original.buyLow}–${original.buyHigh}`;
     ranked.push({
       ...original,
       score,
       potentialLabel: potentialLabel(score),
-      confidence: Math.round(clamp(item.confidence)),
+      confidence: confidenceScore(item.confidence, original.confidence),
       tag: text(item.tag, original.tag, 24),
-      thesis: texts(item.thesis, original.thesis),
-      risks: texts(item.risks, original.risks),
+      thesis: withoutPriceClaims(item.thesis, original.thesis),
+      risks: [
+        ...withoutPriceClaims(item.risks, original.risks),
+        priceFact,
+      ].slice(0, 5),
     });
   }
   for (const original of report.candidates) {
@@ -409,7 +458,10 @@ function mergeHoldingActions(
         (holding.market_value / Math.max(profile.portfolio.total_asset, 1)) *
           100,
       score: original?.score ?? candidate?.score ?? 0,
-      confidence: Math.round(clamp(model?.confidence ?? original?.confidence)),
+      confidence: confidenceScore(
+        model?.confidence,
+        original?.confidence,
+      ),
       priceCondition: text(
         model?.priceCondition,
         original?.priceCondition ?? "行情或持仓信息不足，人工复核",
@@ -492,11 +544,12 @@ export async function synthesizeMarketReport(
   }
   const started = Date.now();
   const snapshot = modelSnapshot(report, profile);
-  const upstream = await fetch(
-    isMoonshot
-      ? chatCompletionsEndpoint(baseUrl)
-      : responsesEndpoint(baseUrl),
-    {
+  const upstream = await fetchModelWithRetry(() =>
+    fetch(
+      isMoonshot
+        ? chatCompletionsEndpoint(baseUrl)
+        : responsesEndpoint(baseUrl),
+      {
       method: "POST",
       cache: "no-store",
       headers: {
@@ -507,6 +560,7 @@ export async function synthesizeMarketReport(
         isMoonshot
           ? {
               model,
+              thinking: { type: "disabled" },
               messages: [
                 { role: "system", content: systemInstruction },
                 { role: "user", content: JSON.stringify(snapshot) },
@@ -519,7 +573,7 @@ export async function synthesizeMarketReport(
                   schema: judgementSchema,
                 },
               },
-              max_completion_tokens: 3600,
+              max_completion_tokens: 1800,
             }
           : {
               model,
@@ -538,7 +592,8 @@ export async function synthesizeMarketReport(
             },
       ),
       signal: AbortSignal.timeout(90_000),
-    },
+      },
+    ),
   );
   const payload = (await upstream.json()) as unknown;
   if (!upstream.ok) {
@@ -598,6 +653,36 @@ export async function synthesizeMarketReport(
                 judgement.decision === "reduce" ? "warning" : "neutral",
             },
           ];
+  const eligibleCandidates = candidates.filter(
+    (candidate) =>
+      candidate.price >= candidate.buyLow &&
+      candidate.price <= candidate.buyHigh &&
+      maxBuyQuantity(candidate, profile, 0) >= 100,
+  );
+  const modelSummary = text(judgement.summary, report.summary, 800)
+    .split(/(?<=[。！？])/)
+    .filter(
+      (sentence) =>
+        eligibleCandidates.length === 0 ||
+        !/全部候选.*(?:超出|不满足)|候选.*均已超出/.test(sentence),
+    )
+    .join("");
+  const executionFact =
+    eligibleCandidates.length > 0
+      ? `服务端执行复核：${eligibleCandidates.length}只候选当前位于买入区间且至少可买1手，代码为${eligibleCandidates.map((item) => item.code).join("、")}。`
+      : "服务端执行复核：当前没有候选同时满足买入区间和最小1手资金条件。";
+  const safeHeadline =
+    judgement.decision === "operate"
+      ? tradeActions.length > 0
+        ? text(judgement.headline, "模型允许精选，按条件单执行。", 80)
+        : "模型允许精选，但没有生成符合风控的订单。"
+      : judgement.decision === "reduce"
+        ? "模型建议降低风险，暂不开新仓。"
+        : "模型建议等待，当前不下单。";
+  const modelWarnings = texts(judgement.warnings, []).filter(
+    (item) =>
+      !/买入区间|价格条件|风险预算约束|单票上限|最大可买/.test(item),
+  );
   return {
     ...report,
     analysisMode: "model" as const,
@@ -605,8 +690,8 @@ export async function synthesizeMarketReport(
     modelName: model,
     analysisDurationMs: Date.now() - started,
     decision: judgement.decision,
-    headline: text(judgement.headline, report.headline, 80),
-    summary: text(judgement.summary, report.summary, 800),
+    headline: safeHeadline,
+    summary: `${modelSummary}${modelSummary.endsWith("。") ? "" : "。"}${executionFact}`,
     riskLevel: text(judgement.riskLevel, report.riskLevel, 40),
     regimeScore: Math.round(clamp(judgement.regimeScore)),
     aShareSignal: Math.round(clamp(judgement.aShareSignal)),
@@ -618,7 +703,8 @@ export async function synthesizeMarketReport(
     freshnessText: `${report.freshnessText} · 模型研判${Math.max(1, Date.now() - started)}ms`,
     warnings: [
       ...report.warnings,
-      ...texts(judgement.warnings, []),
+      ...modelWarnings,
+      executionFact,
       "模型已参与综合研判；输出仍可能出错，成交前须核对行情、公告与账户限制。",
     ].filter((item, index, all) => all.indexOf(item) === index),
   };
