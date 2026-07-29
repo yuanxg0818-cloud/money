@@ -17,6 +17,7 @@ const ETF_URL =
   "https://push2delay.eastmoney.com/api/qt/clist/get?pz=100&po=1&np=1&fltt=2&invt=2&fid=f6&fs=b:MK0021,b:MK0022,b:MK0023,b:MK0024&fields=f12,f14,f2,f3,f4,f5,f6,f8,f10,f15,f16,f17,f18,f20,f21,f24,f25";
 const NEWS_URL =
   "https://np-weblist.eastmoney.com/comm/web/getFastNewsList?client=web&biz=web_724&fastColumn=102&sortEnd=&pageSize=200&req_trace=1710315450384";
+const MODEL_CANDIDATE_POOL_SIZE = 40;
 
 type QuoteRow = Record<string, string | number | null | undefined>;
 
@@ -629,7 +630,7 @@ export async function buildLiveMarketReport(
     .map((quote) => ({ ...buildCandidate(quote, news), rank: 0 }));
   const candidates = [...stockCandidates, ...etfCandidates]
     .sort((a, b) => b.score - a.score || b.amount - a.amount)
-    .slice(0, 10)
+    .slice(0, MODEL_CANDIDATE_POOL_SIZE)
     .map((candidate, index) => ({ ...candidate, rank: index + 1 }));
   const breadth = buildBreadth(stocks);
   const aIndices = indices.filter((index) => index.market === "CN");
