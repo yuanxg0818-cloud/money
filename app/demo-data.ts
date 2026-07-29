@@ -17,6 +17,7 @@ const generatedAt = new Date().toISOString();
 
 export const DEMO_REPORT: MarketReport = {
   source: "demo",
+  analysisMode: "rules",
   generatedAt,
   marketStatus: "等待刷新",
   freshnessText: "界面样例",
