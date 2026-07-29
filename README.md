@@ -6,7 +6,7 @@
 - 查看上涨潜力 Top 10、评分因子、价格条件、入选理由与风险；
 - 手工录入或通过截图识别持仓；
 - 在独立持仓诊断区逐只获得持有、加仓、减仓或卖出条件；
-- 在页面填写 OpenAI Responses API 或 Moonshot Chat Completions API 的地址、模型名和 Key；
+- 默认使用服务端托管的 Moonshot API 与 `kimi-k2.6`，也允许用户临时切换到自己的模型 Key；
 - 仅在当前浏览器保存持仓及风险偏好；
 - 通过服务端代理调用独立的 Python 行情分析引擎。
 
@@ -37,15 +37,22 @@ ANALYTICS_SHARED_SECRET=use-a-long-random-secret
 
 # 允许用户在 H5 中填写的模型 API 主机名
 LLM_ALLOWED_HOSTS=api.openai.com,api.moonshot.cn
+
+# 默认 Kimi 服务端密钥，只能配置在 EdgeOne 环境变量中
+MOONSHOT_API_KEY=replace-with-a-rotated-key
+
+# 可选；不填写时默认 kimi-k2.6
+MOONSHOT_MODEL=kimi-k2.6
 ```
 
 不要将真实 Key 写入 `.env.example`、Git、网页源码或 URL。
 
 ## 数据与密钥边界
 
-- 模型 Key 默认只存在当前页面内存；用户可选择保存在当前标签页的 `sessionStorage`。
-- Key 只随“连接测试”“截图识别”或“生成综合建议”请求发送给本站服务端，再临时转发到用户配置的模型 API。
-- 服务端不记录 Key；持仓与风险设置仅保存在当前浏览器。
+- 默认 Kimi Key 只保存在 EdgeOne 的加密环境变量中，不写入网页、GitHub 或浏览器。
+- 用户自行填写的模型 Key 默认只存在当前页面内存；可选择保存在当前标签页的 `sessionStorage`。
+- 用户 Key 只随“连接测试”“截图识别”或“生成综合建议”请求发送给本站服务端，再临时转发到用户配置的模型 API。
+- 服务端不记录用户 Key；持仓与风险设置仅保存在当前浏览器。
 - 自定义模型地址必须是 HTTPS，且主机名必须加入服务端白名单，以避免 SSRF。
 - Moonshot 使用 `https://api.moonshot.cn/v1`，持仓截图识别建议选择 `kimi-k2.6`。
 - 持仓截图会发送给用户选择的模型服务商，页面会在上传区明确提示。
@@ -64,7 +71,7 @@ npm test
 1. 将本分支推送到 EdgeOne 可访问的 GitHub、GitLab 或 Gitee 仓库。
 2. 在 Makers 创建 Next.js 项目，生产分支选择 `main`。
 3. `edgeone.json` 已固定 `.next` 全栈输出目录、Node.js 22.17.1、广州 Cloud Functions 与 120 秒超时，避免项目被误判为纯静态站点。
-4. 在生产环境配置 `LLM_ALLOWED_HOSTS`，按需配置高级分析引擎的三个环境变量。
+4. 在生产环境配置 `MOONSHOT_API_KEY`、`MOONSHOT_MODEL=kimi-k2.6` 和 `LLM_ALLOWED_HOSTS=api.openai.com,api.moonshot.cn`；按需配置高级分析引擎的三个环境变量。
 5. 部署完成后绑定已备案的自定义域名。
 
 ## 推荐部署拓扑
