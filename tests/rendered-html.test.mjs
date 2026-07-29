@@ -22,12 +22,24 @@ async function javascriptFiles(directory) {
 }
 
 test("contains the finished Chinese investment app and security policy", async () => {
-  const [layout, app, nextConfig, liveMarket, edgeone] = await Promise.all([
+  const [
+    layout,
+    app,
+    nextConfig,
+    liveMarket,
+    edgeone,
+    llmSecurity,
+    llmTest,
+    portfolioParse,
+  ] = await Promise.all([
     source("../app/layout.tsx"),
     source("../app/CopilotApp.tsx"),
     source("../next.config.ts"),
     source("../app/api/live-market.ts"),
     source("../edgeone.json"),
+    source("../app/api/security.ts"),
+    source("../app/api/llm/test/route.ts"),
+    source("../app/api/portfolio/parse/route.ts"),
   ]);
 
   assert.match(layout, /盘前 · AI 投研/);
@@ -44,6 +56,11 @@ test("contains the finished Chinese investment app and security policy", async (
   assert.match(nextConfig, /Content-Security-Policy/);
   assert.match(edgeone, /ap-guangzhou/);
   assert.match(edgeone, /22\.17\.1/);
+  assert.match(llmSecurity, /api\.moonshot\.cn/);
+  assert.match(llmSecurity, /chat\/completions/);
+  assert.match(llmTest, /Moonshot API 不能使用 GPT 模型/);
+  assert.match(portfolioParse, /kimi-k2\.6/);
+  assert.match(portfolioParse, /json_schema/);
   assert.doesNotMatch(app, /codex-preview|Your site is taking shape/i);
 });
 
