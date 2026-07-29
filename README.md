@@ -6,7 +6,7 @@
 - 查看上涨潜力 Top 10、评分因子、价格条件、入选理由与风险；
 - 手工录入或通过截图识别持仓；
 - 在独立持仓诊断区逐只获得持有、加仓、减仓或卖出条件；
-- 在页面填写兼容 OpenAI Responses API 的模型地址、模型名和 Key；
+- 在页面填写 OpenAI Responses API 或 Moonshot Chat Completions API 的地址、模型名和 Key；
 - 仅在当前浏览器保存持仓及风险偏好；
 - 通过服务端代理调用独立的 Python 行情分析引擎。
 
@@ -23,7 +23,7 @@ npm run dev
 
 ## 环境变量
 
-复制 `.env.example`，按需配置：
+在 EdgeOne Makers 的生产环境变量中按需配置：
 
 ```dotenv
 # Python 分析引擎的公网 HTTPS 地址
@@ -36,7 +36,7 @@ ANALYTICS_ALLOWED_HOSTS=your-engine.example.com
 ANALYTICS_SHARED_SECRET=use-a-long-random-secret
 
 # 允许用户在 H5 中填写的模型 API 主机名
-LLM_ALLOWED_HOSTS=api.openai.com
+LLM_ALLOWED_HOSTS=api.openai.com,api.moonshot.cn
 ```
 
 不要将真实 Key 写入 `.env.example`、Git、网页源码或 URL。
@@ -45,15 +45,15 @@ LLM_ALLOWED_HOSTS=api.openai.com
 
 - 模型 Key 默认只存在当前页面内存；用户可选择保存在当前标签页的 `sessionStorage`。
 - Key 只随“连接测试”或“截图识别”请求发送给本站服务端，再临时转发到用户配置的模型 API。
-- 服务端不记录 Key，D1 仅保存匿名设备对应的持仓与风险设置。
+- 服务端不记录 Key；持仓与风险设置仅保存在当前浏览器。
 - 自定义模型地址必须是 HTTPS，且主机名必须加入服务端白名单，以避免 SSRF。
+- Moonshot 使用 `https://api.moonshot.cn/v1`，持仓截图识别建议选择 `kimi-k2.6`。
 - 持仓截图会发送给用户选择的模型服务商，页面会在上传区明确提示。
 - 持仓诊断默认不发送证券代码。用户单独确认后，站点仅把证券代码临时发送给东方财富公开行情接口查询实时价格，不发送数量、成本、资金或账户信息。
 
 ## 构建
 
 ```bash
-npm run db:generate
 npm run build
 npm test
 ```
