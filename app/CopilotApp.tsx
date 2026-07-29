@@ -21,9 +21,9 @@ type Toast = { tone: "ok" | "warn"; text: string } | null;
 type CandidateFilter = "all" | "stock" | "etf";
 
 const DEFAULT_LLM: LlmConfig = {
-  baseUrl: "https://api.openai.com/v1",
+  baseUrl: "https://api.moonshot.cn/v1",
   apiKey: "",
-  model: "gpt-5.6",
+  model: "kimi-k2.6",
 };
 const PROFILE_STORAGE_KEY = "premarket_profile_v1";
 
@@ -103,6 +103,7 @@ export function CopilotApp() {
   const [rememberKey, setRememberKey] = useState(false);
   const [keyVisible, setKeyVisible] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [serverModelConfigured, setServerModelConfigured] = useState(false);
   const [running, setRunning] = useState(false);
   const [portfolioRunning, setPortfolioRunning] = useState(false);
   const [holdingQuoteConsent, setHoldingQuoteConsent] = useState(false);
@@ -140,6 +141,33 @@ export function CopilotApp() {
           setLlm(parsed);
           setRememberKey(true);
         }
+        void fetch("/api/llm/status", {
+          cache: "no-store",
+          headers: { "Cache-Control": "no-cache" },
+        })
+          .then(async (response) => {
+            if (!response.ok) return;
+            const status = (await response.json()) as {
+              configured?: boolean;
+              baseUrl?: string;
+              model?: string;
+            };
+            if (!status.configured) return;
+            setServerModelConfigured(true);
+            setLlm((current) =>
+              current.apiKey
+                ? current
+                : {
+                    baseUrl: status.baseUrl || DEFAULT_LLM.baseUrl,
+                    apiKey: "",
+                    model: status.model || DEFAULT_LLM.model,
+                  },
+            );
+            setConnection("connected");
+          })
+          .catch(() => {
+            // The report endpoint will return the actionable configuration error.
+          });
       } catch {
         localStorage.removeItem(PROFILE_STORAGE_KEY);
         sessionStorage.removeItem("premarket_llm");
@@ -236,7 +264,7 @@ export function CopilotApp() {
     if (
       connection !== "connected" ||
       !llm.baseUrl.trim() ||
-      !llm.apiKey.trim() ||
+      (!serverModelConfigured && !llm.apiKey.trim()) ||
       !llm.model.trim()
     ) {
       setSettingsOpen(true);
@@ -333,7 +361,7 @@ export function CopilotApp() {
         throw new Error(payload.error || "连接失败");
       }
       setConnection("connected");
-      if (rememberKey) {
+      if (rememberKey && effectiveLlm.apiKey) {
         sessionStorage.setItem(
           "premarket_llm",
           JSON.stringify(effectiveLlm),
@@ -341,7 +369,13 @@ export function CopilotApp() {
       } else {
         sessionStorage.removeItem("premarket_llm");
       }
-      setToast({ tone: "ok", text: `模型已连接 · ${payload.latencyMs}ms` });
+      if (payload.managed) setServerModelConfigured(true);
+      setToast({
+        tone: "ok",
+        text: `${
+          payload.managed ? "服务端 Kimi" : "模型"
+        }已连接 · ${payload.latencyMs}ms`,
+      });
     } catch (error) {
       setConnection("failed");
       setToast({
@@ -357,9 +391,12 @@ export function CopilotApp() {
     const file = event.target.files?.[0];
     if (!file) return;
     setFileName(file.name);
-    if (!llm.apiKey) {
+    if (
+      connection !== "connected" ||
+      (!serverModelConfigured && !llm.apiKey)
+    ) {
       setSettingsOpen(true);
-      setToast({ tone: "warn", text: "请先填写并测试模型API" });
+      setToast({ tone: "warn", text: "请先连接模型服务" });
       event.target.value = "";
       return;
     }
@@ -1333,9 +1370,15 @@ export function CopilotApp() {
           </button>
         </div>
         <div className="security-note">
-          <strong>Key 不会保存到本站服务器</strong>
+          <strong>
+            {serverModelConfigured
+              ? "本站已配置服务端 Kimi"
+              : "自带 Key 不会保存到本站服务器"}
+          </strong>
           <span>
-            默认只保留在页面内存；你可选择仅在当前标签页临时保存。
+            {serverModelConfigured
+              ? "默认直接使用 Moonshot 与 kimi-k2.6，无需在浏览器填写 Key。"
+              : "默认只保留在页面内存；你可选择仅在当前标签页临时保存。"}
           </span>
         </div>
         <form onSubmit={testConnection} className="settings-form">
@@ -1357,7 +1400,7 @@ export function CopilotApp() {
                       : current.model,
                 }));
               }}
-              placeholder="https://api.openai.com/v1"
+              placeholder="https://api.moonshot.cn/v1"
               required
             />
             <small>
@@ -1375,7 +1418,7 @@ export function CopilotApp() {
                   model: event.target.value,
                 }));
               }}
-              placeholder="gpt-5.6"
+              placeholder="kimi-k2.6"
               required
             />
             <small>
@@ -1397,9 +1440,13 @@ export function CopilotApp() {
                     apiKey: event.target.value,
                   }));
                 }}
-                placeholder="仅用于本次连接"
+                placeholder={
+                  serverModelConfigured
+                    ? "已使用服务端密钥，可留空"
+                    : "仅用于本次连接"
+                }
                 autoComplete="off"
-                required
+                required={!serverModelConfigured}
               />
               <button
                 type="button"
@@ -1409,14 +1456,16 @@ export function CopilotApp() {
               </button>
             </div>
           </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={rememberKey}
-              onChange={(event) => setRememberKey(event.target.checked)}
-            />
-            <span>仅在当前标签页保存，关闭标签页后自动清除</span>
-          </label>
+          {(!serverModelConfigured || llm.apiKey) && (
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={rememberKey}
+                onChange={(event) => setRememberKey(event.target.checked)}
+              />
+              <span>仅在当前标签页保存，关闭标签页后自动清除</span>
+            </label>
+          )}
           <button
             className="primary-button full-button"
             disabled={testing}
@@ -1432,7 +1481,7 @@ export function CopilotApp() {
           </button>
         </form>
         <div className="drawer-disclaimer">
-          生成建议时，最新行情摘要、技术与风险因子、财经快讯和你录入的持仓会发送给所选模型服务商。持仓截图仅在识别时发送。请勿上传交易密码、短信验证码、身份证或银行卡信息。
+          服务端托管密钥不会下发到浏览器。生成建议时，最新行情摘要、技术与风险因子、财经快讯和你录入的持仓会发送给 Moonshot；持仓截图仅在识别时发送。请勿上传交易密码、短信验证码、身份证或银行卡信息。
         </div>
       </aside>
 
