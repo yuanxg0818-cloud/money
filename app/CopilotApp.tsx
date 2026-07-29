@@ -294,17 +294,34 @@ export function CopilotApp() {
     setTesting(true);
     setConnection("idle");
     try {
+      const effectiveLlm =
+        /api\.moonshot\.cn/i.test(llm.baseUrl) &&
+        !/^(kimi-|moonshot-)/i.test(llm.model)
+          ? { ...llm, model: "kimi-k2.6" }
+          : llm;
+      if (effectiveLlm !== llm) setLlm(effectiveLlm);
       const response = await fetch("/api/llm/test", {
         method: "POST",
         cache: "no-store",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(llm),
+        body: JSON.stringify(effectiveLlm),
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "连接失败");
+      if (!response.ok) {
+        if (payload.suggestedModel) {
+          setLlm((current) => ({
+            ...current,
+            model: payload.suggestedModel,
+          }));
+        }
+        throw new Error(payload.error || "连接失败");
+      }
       setConnection("connected");
       if (rememberKey) {
-        sessionStorage.setItem("premarket_llm", JSON.stringify(llm));
+        sessionStorage.setItem(
+          "premarket_llm",
+          JSON.stringify(effectiveLlm),
+        );
       } else {
         sessionStorage.removeItem("premarket_llm");
       }
@@ -1305,16 +1322,24 @@ export function CopilotApp() {
             <input
               type="url"
               value={llm.baseUrl}
-              onChange={(event) =>
+              onChange={(event) => {
+                const baseUrl = event.target.value;
                 setLlm((current) => ({
                   ...current,
-                  baseUrl: event.target.value,
-                }))
-              }
+                  baseUrl,
+                  model:
+                    /api\.moonshot\.cn/i.test(baseUrl) &&
+                    /^(gpt-|o\d)/i.test(current.model)
+                      ? "kimi-k2.6"
+                      : current.model,
+                }));
+              }}
               placeholder="https://api.openai.com/v1"
               required
             />
-            <small>自定义域名需要由站点管理员加入安全白名单。</small>
+            <small>
+              已支持 api.openai.com 与 api.moonshot.cn。
+            </small>
           </label>
           <label>
             <span>模型名称</span>
@@ -1329,6 +1354,11 @@ export function CopilotApp() {
               placeholder="gpt-5.6"
               required
             />
+            <small>
+              {/api\.moonshot\.cn/i.test(llm.baseUrl)
+                ? "Moonshot 持仓截图识别建议使用 kimi-k2.6"
+                : "OpenAI Responses API 请填写可用的 GPT 模型名称"}
+            </small>
           </label>
           <label>
             <span>API Key</span>
