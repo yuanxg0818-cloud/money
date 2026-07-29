@@ -122,3 +122,22 @@ export function sameOriginOrNoOrigin(request: Request) {
     return false;
   }
 }
+
+export async function fetchModelWithRetry(
+  request: () => Promise<Response>,
+  attempts = 2,
+) {
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    response = await request();
+    if (response.status !== 429 || attempt === attempts - 1) {
+      return response;
+    }
+    await response.body?.cancel();
+    await new Promise((resolve) =>
+      setTimeout(resolve, 1_000 * (attempt + 1)),
+    );
+  }
+  if (!response) throw new Error("模型请求未执行");
+  return response;
+}
