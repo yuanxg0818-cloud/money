@@ -1,4 +1,3 @@
-import { DEMO_REPORT } from "../../demo-data";
 import type {
   HoldingAdvice,
   MarketReport,
@@ -6,6 +5,7 @@ import type {
   ReportAction,
 } from "../../types";
 import { buildLiveMarketReport } from "../live-market";
+import { synthesizeMarketReport } from "../model-analysis";
 import { sameOriginOrNoOrigin, validateExternalBaseUrl } from "../security";
 
 type UpstreamReport = {
@@ -101,6 +101,15 @@ type UpstreamReport = {
     detail?: string;
   }>;
   warnings?: string[];
+};
+
+type ReportRequest = {
+  profile?: ProfilePayload;
+  llm?: {
+    baseUrl?: string;
+    apiKey?: string;
+    model?: string;
+  };
 };
 
 function numeric(value: unknown, fallback = 0) {
@@ -304,6 +313,7 @@ function normalizeReport(
   });
   return {
     source: value.data_mode === "live" ? "live" : "demo",
+    analysisMode: "rules",
     generatedAt,
     marketStatus:
       value.phase === "intraday"
@@ -379,11 +389,30 @@ export async function POST(request: Request) {
     return noStore({ error: "请求来源校验失败" }, { status: 403 });
   }
   let profile: ProfilePayload;
+  let llm: ReportRequest["llm"];
   try {
-    profile = (await request.json()) as ProfilePayload;
+    const body = (await request.json()) as ReportRequest | ProfilePayload;
+    if ("profile" in body && body.profile) {
+      profile = body.profile;
+      llm = body.llm;
+    } else {
+      profile = body as ProfilePayload;
+    }
   } catch {
     return noStore({ error: "账户数据格式不正确" }, { status: 400 });
   }
+  if (!llm?.baseUrl || !llm.apiKey || !llm.model) {
+    return noStore(
+      {
+        error:
+          "请先在模型 API 设置中测试并连接模型；未调用模型不会生成买卖建议",
+        code: "MODEL_REQUIRED",
+      },
+      { status: 428 },
+    );
+  }
+  let baseReport: MarketReport | null = null;
+  let dataMessage = "已按点击时刻刷新实时行情、指数和财经快讯";
   const backend = process.env.ANALYTICS_API_BASE_URL?.trim();
   if (backend) {
     try {
@@ -412,47 +441,40 @@ export async function POST(request: Request) {
         throw new Error(`高级分析引擎返回 ${upstream.status}`);
       }
       const rawReport = (await upstream.json()) as UpstreamReport;
-      const report = normalizeReport(rawReport, profile);
-      return noStore({
-        report,
-        source: report.source,
-        message:
-          rawReport.data_mode === "blocked"
-            ? "实时数据校验未通过，已禁用交易候选"
-            : undefined,
-      });
+      baseReport = normalizeReport(rawReport, profile);
+      dataMessage =
+        rawReport.data_mode === "blocked"
+          ? "实时数据校验未通过，已禁用交易候选"
+          : "高级数据与模型综合研判已完成";
     } catch {
       // Continue to the live lightweight provider.
     }
   }
   try {
-    const report = await buildLiveMarketReport(profile);
+    if (!baseReport) baseReport = await buildLiveMarketReport(profile);
+    const report = await synthesizeMarketReport(
+      baseReport,
+      profile,
+      {
+        baseUrl: llm.baseUrl,
+        apiKey: llm.apiKey,
+        model: llm.model,
+      },
+    );
     return noStore({
       report,
       source: report.source,
-      message: "已按点击时刻刷新实时行情、指数和财经快讯",
+      message: `${dataMessage} · ${report.modelProvider} ${report.modelName} 已参与`,
     });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "实时数据源暂时不可用";
-    return noStore({
-      report: {
-        ...DEMO_REPORT,
-        generatedAt: new Date().toISOString(),
-        freshnessText: "实时源异常 · 已停止生成新交易动作",
-        actions: [
-          {
-            time: "当前",
-            title: "不下单",
-            detail: "实时行情校验失败，当前仅展示界面样例",
-            tone: "warning",
-          },
-        ],
-        candidates: [],
-        holdingActions: [],
+      error instanceof Error ? error.message : "实时数据或模型暂时不可用";
+    return noStore(
+      {
+        error: `${message}；本次没有生成或展示规则替代建议`,
+        code: "ANALYSIS_FAILED",
       },
-      source: "demo",
-      message: `${message}；已切换到安全演示模式`,
-    });
+      { status: 502 },
+    );
   }
 }
